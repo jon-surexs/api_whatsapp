@@ -1,0 +1,4 @@
+{
+    "appService.defaultWebAppToDeploy": "/subscriptions/edf3059b-7162-4347-8931-966a3fe03217/resourceGroups/apiwhatsappresource/providers/Microsoft.Web/sites/whats-app-surexs-app",
+    "appService.deploySubpath": "src"
+}
