@@ -3,30 +3,43 @@
 const fs = require('fs');
 const path = require('path');
 
-// Define la ruta absoluta al archivo de logs (sube dos niveles desde 'src/utils')
+// Ruta absoluta al archivo de logs
 const LOG_FILE_PATH = path.join(__dirname, '../../logs.txt');
 
 /**
- * Escribe un mensaje de log de forma síncrona al archivo logs.txt.
- * Esto asegura que los logs se escriban inmediatamente para depuración.
+ * Escribe un mensaje de log tanto en archivo como en consola.
  * @param {string} level - Nivel del log (DEBUG, INFO, ERROR, WARN).
  * @param {string} message - El mensaje a loguear.
- * @param {any} [data] - Datos adicionales para loguear (opcional).
+ * @param {any} [data] - Datos adicionales (opcional).
  */
 const log = (level, message, data) => {
     const timestamp = new Date().toISOString();
     let logMessage = `[${timestamp}] [${level}] ${message}`;
 
-    if (data !== undefined) { // Asegura que 'undefined' no se convierta en "null" o "undefined" string
+    if (data !== undefined) {
         logMessage += ` - Data: ${JSON.stringify(data, null, 2)}`;
     }
 
+    // 🔥 1️⃣ Mostrar en consola
+    switch (level) {
+        case 'ERROR':
+            console.error(logMessage);
+            break;
+        case 'WARN':
+            console.warn(logMessage);
+            break;
+        case 'DEBUG':
+            console.debug(logMessage);
+            break;
+        default:
+            console.log(logMessage);
+    }
+
+    // 🔥 2️⃣ Guardar en archivo
     try {
         fs.appendFileSync(LOG_FILE_PATH, logMessage + '\n', 'utf8');
     } catch (err) {
-        // Fallback: si no podemos escribir en el archivo, lo mostramos en la consola
         console.error(`ERROR AL ESCRIBIR EN LOGS.TXT: ${err.message}`);
-        console.error(`Mensaje que no se pudo loguear: ${logMessage}`);
     }
 };
 

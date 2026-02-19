@@ -15,6 +15,8 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware para parsear el cuerpo de las peticiones JSON
 app.use(express.json());
+// Soporte para fomrs
+app.use(express.urlencoded({ extended: true }));
 
 // Middleware para loguear todas las peticiones entrantes ANTES de que lleguen a las rutas específicas
 app.use((req, res, next) => {

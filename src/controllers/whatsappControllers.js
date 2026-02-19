@@ -17,9 +17,6 @@ const UserConversation = require('../models/UserConversation');
 // --- Importar el nuevo logger ---
 const logger = require('../utils/logger');
 
-
-
-
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN ;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID || "121909740999261";
 
@@ -58,12 +55,6 @@ const VerifyToken = (req, res) => {
 };
 // --- Fin Función de Verificación ---
 
-
-
-
-
-
-
 // --- Función para Recibir y Procesar Webhooks de Mensajes ---
 // Esta es la función principal que procesa los mensajes entrantes de WhatsApp.
 const ReceivedMessage = async (req, res) => {
@@ -99,8 +90,6 @@ const ReceivedMessage = async (req, res) => {
       const waIdRaw = fromRaw;                 // "5215539689276"
       const waIdE164 = normalizeMxWaId(waIdRaw); // "525539689276"
       const waIdPlus = `+${waIdE164}`; 
-
-
 
 
       // Preparar los datos del mensaje para el handler
