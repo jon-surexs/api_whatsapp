@@ -1,3 +1,4 @@
+// utils/extractor.js
 // Normaliza el número para que sea SIEMPRE la misma llave
 // (ej: 521XXXXXXXXXX -> +52XXXXXXXXXX)
 const normalizeToWaId = (n) => {
@@ -49,39 +50,51 @@ const isValidEmail = (email) => {
 };
 
 // Parser básico para "Nombre, Puesto, Empresa, Correo" en un solo texto.
+// ------------------------------------------------------------
+// Parser tolerante para bloque de contacto.
+// Acepta múltiples formatos:
+// - Separados por coma
+// - Separados por punto y coma
+// - Sin comas (detecta email por regex)
+// - Limpia espacios y emails pegados
+// ------------------------------------------------------------
 const parseContactBlock = (text) => {
   const out = { name: null, role: null, company: null, email: null };
   if (!text) return out;
 
-  const emailMatch = text.match(/[^\s@]+@[^\s@]+\.[^\s@]{2,}/);
-  if (emailMatch) out.email = emailMatch[0];
+  // Normalizamos saltos de línea y espacios múltiples
+  const norm = text.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
 
-  const norm = text.replace(/\n/g, " ").trim();
-
-  const grab = (labelRegex) => {
-    const m = norm.match(labelRegex);
-    return m ? m[1].trim() : null;
-  };
-
-  out.name = grab(/nombre\s*[:\-]\s*([^,]+?)(?=\s*(puesto|empresa|correo|email)\s*[:\-]|$)/i);
-  out.role = grab(/puesto\s*[:\-]\s*([^,]+?)(?=\s*(nombre|empresa|correo|email)\s*[:\-]|$)/i);
-  out.company = grab(/empresa\s*[:\-]\s*([^,]+?)(?=\s*(nombre|puesto|correo|email)\s*[:\-]|$)/i);
-
-  // Fallback: "Juan Pérez, RH, ACME SA, juan@acme.com"
-  if (!out.name || !out.role || !out.company) {
-    const parts = norm.split(",").map((s) => s.trim()).filter(Boolean);
-    if (parts.length >= 3) {
-      if (!out.name) out.name = parts[0] || out.name;
-      if (!out.role) out.role = parts[1] || out.role;
-      if (!out.company) out.company = parts[2] || out.company;
-    }
+  // 1️⃣ Detectar email primero (independiente del orden)
+  const emailMatch = norm.match(/[^\s@]+@[^\s@]+\.[^\s@]{2,}/);
+  if (emailMatch) {
+    out.email = emailMatch[0].trim();
   }
-    // Cleanup: si company trae un email pegado, se lo quitamos
-  if (out.company) {
-    const emailRx = /[^\s@]+@[^\s@]+\.[^\s@]{2,}/g;
-    out.company = out.company.replace(emailRx, "").replace(/\s+/g, " ").trim();
-    if (!out.company) out.company = null;
+
+  // 2️⃣ Remover email del texto para no contaminar campos
+  let textWithoutEmail = norm;
+  if (out.email) {
+    textWithoutEmail = norm.replace(out.email, "").trim();
   }
+
+  // 3️⃣ Intentar split flexible (coma o punto y coma)
+  let parts = textWithoutEmail
+    .split(/[,;]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  // 4️⃣ Si no hay suficientes partes, intentar split por bloques grandes de espacio
+  if (parts.length < 3) {
+    parts = textWithoutEmail
+      .split(/\s{2,}/) // doble espacio como separador natural
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+
+  // 5️⃣ Asignar campos si existen
+  if (parts.length >= 1) out.name = parts[0] || null;
+  if (parts.length >= 2) out.role = parts[1] || null;
+  if (parts.length >= 3) out.company = parts[2] || null;
 
   return out;
 };

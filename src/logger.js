@@ -4,14 +4,21 @@ const logger = createLogger({
   level: "info",
   format: format.combine(
     format.timestamp(),
-    format.printf(({ timestamp, level, message }) => {
-      return `[${timestamp}] [${level.toUpperCase()}] ${message}`;
+    format.errors({ stack: true }),
+    format.printf(({ timestamp, level, message, ...meta }) => {
+      let msg = `[${timestamp}] [${level.toUpperCase()}] ${message}`;
+
+      if (Object.keys(meta).length > 0) {
+        msg += ` | ${JSON.stringify(meta)}`;
+      }
+
+      return msg;
     })
   ),
   transports: [
-    new transports.Console(), // 👈 esto solo imprime en terminal
+    new transports.Console(),
     new transports.File({ filename: "logs/error.log", level: "error" }),
-    new transports.File({ filename: "logs/combined.log" }) // 👈 ESTE es el importante
+    new transports.File({ filename: "logs/combined.log" })
   ]
 });
 

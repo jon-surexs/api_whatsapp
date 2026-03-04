@@ -112,8 +112,14 @@ const listOutboxLeads = async (req, res) => {
     const stRaw = String(x.status || "");
     const st = escapeHtml(stRaw);
 
-    const emp = escapeHtml(x.payload?.benefits?.employee_count ?? "");
-    const prod = escapeHtml((x.payload?.benefits?.products || []).join(", "));
+    // Extrae datos de benefits según estructura real del payload M2_SINGLE
+      const emp = escapeHtml(
+        x.payload?.benefits?.employee_range ?? ""
+      );
+
+      const prod = escapeHtml(
+        (x.payload?.benefits?.coverages || []).join(", ")
+      );
     const name = escapeHtml(x.payload?.contact?.name ?? "");
     const company = escapeHtml(x.payload?.contact?.company ?? "");
     const email = escapeHtml(x.payload?.contact?.email ?? "");

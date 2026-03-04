@@ -1,5 +1,8 @@
 // src/controllers/whatsappControllers.js
-
+// Qué hace:
+// Recibe mensaje del webhook.
+// Llama a messageHandler.
+// Es el punto de entrada.
 
 // const fs = require("fs");
 
@@ -94,19 +97,27 @@ const ReceivedMessage = async (req, res) => {
 
       // Preparar los datos del mensaje para el handler
       const messageData = {
-          messageId: messages.id, 
-          from: messages.from, // <-- tal cual viene del webhook (ej: "5215539689276")
-          type: typeMessage,
-          textBody: (typeMessage === "text") ? messages.text.body : undefined,
-          buttonId:
-            (typeMessage === "interactive" && messages.interactive?.type === "button_reply")
-              ? messages.interactive.button_reply.id
-              : undefined,
-          buttonTitle:
-            (typeMessage === "interactive" && messages.interactive?.type === "button_reply")
-              ? messages.interactive.button_reply.title
-              : undefined,
-        };
+        messageId: messages.id,
+        from: messages.from,
+        type: typeMessage,
+
+        textBody:
+          typeMessage === "text"
+            ? messages.text.body
+            : undefined,
+
+        buttonId:
+          typeMessage === "interactive"
+            ? messages.interactive?.button_reply?.id ||
+              messages.interactive?.list_reply?.id
+            : undefined,
+
+        buttonTitle:
+          typeMessage === "interactive"
+            ? messages.interactive?.button_reply?.title ||
+              messages.interactive?.list_reply?.title
+            : undefined,
+      };
 
 
       console.log("🚀 Llamando a handleIncomingMessage con:", messageData);

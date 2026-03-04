@@ -1,7 +1,13 @@
 // src/flows/m1_intent.js
+// Qué hace:
+// Clasifica intención.
+// Decide si es flujo empresarial.
+// No decide prioridad.
+// Solo detecta intención.
+
 
 const { classifyIntent, CONFIDENCE_THRESHOLD } = require("../services/intentClassifierService");
-const logger = require("../utils/logger");
+const logger = require("../logger");
 
 async function handleM1Intent({ message }) {
   const result = classifyIntent(message);

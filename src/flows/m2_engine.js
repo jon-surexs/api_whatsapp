@@ -1,229 +1,324 @@
 // src/flows/m2_engine.js
-const { STATES } = require("../constants/states");
-const rules = require("../config/rules");
-const { PRODUCTS } = require("../config/products");
-const { ensureConversationData, parseContactBlock, isValidEmail } = require("../utils/extractors");
 
+/**
+ * ============================================================
+ * M2 ENGINE — MOTOR GENÉRICO DE FLUJOS DE PRODUCTO
+ * ============================================================
+ *
+ * Este engine:
+ * - NO contiene lógica de negocio
+ * - NO contiene definición de productos
+ * - Solo ejecuta el flujo definido en productsRegistry
+ *
+ * Arquitectura:
+ *
+ * Webhook
+ *   → messageHandler
+ *       → routeMessage
+ *           → M1 (intent)
+ *           → M2 (este engine)
+ *       → M3 (Outbox)
+ *
+ * El producto define:
+ * - steps
+ * - evaluateQualification()
+ * - build_payload_fragment()
+ *
+ * El engine solo ejecuta.
+ */
+
+const PRODUCTS = require("./productsRegistry");
+
+const {
+  ensureConversationData,
+  parseContactBlock,
+  isValidEmail
+} = require("../utils/extractors");
+
+/**
+ * Estados internos del flujo M2
+ * Se usan strings directos para simplificar arquitectura.
+ */
 const M2 = {
-  ENTRY: STATES.M2_ENTRY,
-  INTAKE: STATES.M2_INTAKE,
-  CONTACT: STATES.M2_CONTACT,
-  DONE: STATES.M2_DONE,
+  INTAKE: "M2_INTAKE",
+  CONTACT: "M2_CONTACT",
+  DONE: "M2_DONE",
 };
 
+/**
+ * Inicializa estructura M2 en la conversación si no existe.
+ */
 const initM2 = (conv) => {
   ensureConversationData(conv);
+
   if (!conv.conversation_data.m2) {
     conv.conversation_data.m2 = {
-      selected_products: [],
-      active_product: null,
+      product: null,
       active_step_index: 0,
       answers: {},
       contact: null,
+      qualificationStatus: null,
+      leadPriority: null,
     };
+
     conv.markModified("conversation_data");
   }
 };
 
-const detectProductsFromText = (text) => {
-  const t = String(text || "");
-  const hits = Object.values(PRODUCTS)
-    .filter((p) => (p.detect?.keywords || []).some((rx) => rx.test(t)))
-    .map((p) => p.key);
-  return [...new Set(hits)];
-};
+/**
+ * ============================================================
+ * FUNCIÓN PRINCIPAL
+ * ============================================================
+ */
+const handleM2Engine = ({ currentState, type, textBody, buttonId, buttonTitle }) => {
 
-const pickFirstUnfinishedProduct = (m2) => {
-  for (const k of m2.selected_products) {
-    const ans = m2.answers?.[k] || {};
-    const steps = PRODUCTS[k]?.steps || [];
-    const done = steps.every((step) => (step.is_valid ? step.is_valid(ans) : true));
-    if (!done) return k;
-  }
-  return null;
-};
+  const isEntryButton = Object
+    .values(PRODUCTS)
+    .some(p => p.entry_button_id === buttonId);
 
-const handleM2Engine = ({ currentState, type, textBody, buttonId }) => {
-  const isEntryButton = Object.values(PRODUCTS).some((p) => p.entry_button_id === buttonId);
-
-  const isSysMenu = currentState === STATES.SYS_MENU;
-  const textHasProduct = type === "text" && detectProductsFromText(textBody || "").length > 0;
-
-  if (!(isEntryButton || currentState?.startsWith("M2_") || (isSysMenu && textHasProduct))) {
+  // M2 solo actúa si:
+  // - Es botón de producto
+  // - Ya estamos en estado M2
+  if (!(isEntryButton || currentState?.startsWith("M2_"))) {
     return null;
   }
 
+  /**
+   * ============================================================
+   * 1️⃣ ENTRADA POR BOTÓN DE PRODUCTO
+   * ============================================================
+   */
   if (type === "interactive" && isEntryButton) {
-    const productKey = Object.values(PRODUCTS).find((p) => p.entry_button_id === buttonId).key;
 
-    return {
-      nextState: M2.ENTRY,
-      messageToSend: {
-        type: "text",
-        text: { body: `Perfecto. Vamos con ${PRODUCTS[productKey].label}.\n\n(Escribe "continuar" si quieres agregar otro producto.)` },
-      },
-      mutateConversation: (conv) => {
-        initM2(conv);
-        const m2 = conv.conversation_data.m2;
-        if (!m2.selected_products.includes(productKey)) m2.selected_products.push(productKey);
-        m2.active_product = productKey;
-        m2.active_step_index = 0;
-        if (!m2.answers[productKey]) m2.answers[productKey] = {};
-        conv.markModified("conversation_data");
-      },
-    };
-  }
-
-  if (currentState === M2.ENTRY && type === "text") {
-    const text = (textBody || "").trim();
-    const detected = detectProductsFromText(text);
+    const product = Object
+      .values(PRODUCTS)
+      .find(p => p.entry_button_id === buttonId);
 
     return {
       nextState: M2.INTAKE,
-      messageToSend: null,
+
       mutateConversation: (conv) => {
         initM2(conv);
+
         const m2 = conv.conversation_data.m2;
-
-        for (const k of detected) {
-          if (!m2.selected_products.includes(k)) m2.selected_products.push(k);
-          if (!m2.answers[k]) m2.answers[k] = {};
-        }
-
-        if (!m2.active_product) m2.active_product = m2.selected_products[0] || "BENEFITS";
-        if (!m2.answers[m2.active_product]) m2.answers[m2.active_product] = {};
+        m2.product = product.key;
         m2.active_step_index = 0;
+        m2.answers = {};
+        m2.qualificationStatus = null;
+        m2.leadPriority = null;
 
         conv.markModified("conversation_data");
       },
+
       afterMutateMessageToSend: (conv) => {
         const m2 = conv.conversation_data.m2;
-        const p = PRODUCTS[m2.active_product];
+        const p = PRODUCTS[m2.product];
         return p.steps[0].ask();
-      },
+      }
     };
   }
 
-  if (currentState === M2.INTAKE && type === "text") {
-    const text = (textBody || "").trim();
+  /**
+   * ============================================================
+   * 2️⃣ CAPTURA DE STEPS
+   * ============================================================
+   */
+  if (currentState === M2.INTAKE && (type === "text" || type === "interactive")) {
 
     return {
       nextState: M2.INTAKE,
-      messageToSend: null,
-      mutateConversation: (conv) => {
-        initM2(conv);
-        const m2 = conv.conversation_data.m2;
-        const p = PRODUCTS[m2.active_product];
-        const step = p.steps[m2.active_step_index] || p.steps[0];
-        const ans = m2.answers[m2.active_product] || (m2.answers[m2.active_product] = {});
 
-        const parsed = step.parse(text);
-        if (!step.is_valid(parsed) && !step.is_valid(ans)) {
+      mutateConversation: (conv) => {
+
+        initM2(conv);
+
+        const m2 = conv.conversation_data.m2;
+        const p = PRODUCTS[m2.product];
+        const step = p.steps[m2.active_step_index];
+
+        const parsed = step.parse(textBody, { buttonId, buttonTitle });
+
+        if (!step.is_valid(parsed)) {
           conv._m2_fail_message = step.fail_message();
           return;
         }
 
-        step.store(ans, parsed);
-        m2.answers[m2.active_product] = ans;
+        step.store(m2.answers, parsed);
+
+        // Evaluación de negocio delegada al producto
+        if (p.evaluateQualification) {
+          const result = p.evaluateQualification(m2.answers);
+
+          m2.qualificationStatus = result.status;
+          m2.leadPriority = result.priority;
+
+          if (result.status === "redirect_individual") {
+            m2._redirect_individual = true;
+          }
+        }
+
         m2.active_step_index += 1;
 
         if (m2.active_step_index >= p.steps.length) {
-          const nextProd = pickFirstUnfinishedProduct(m2);
-          if (nextProd && nextProd !== m2.active_product) {
-            m2.active_product = nextProd;
-            m2.active_step_index = 0;
-          } else {
-            m2._go_contact = true;
-          }
+          m2._go_contact = true;
         }
 
         conv.markModified("conversation_data");
       },
+
       afterMutate: (conv) => {
-        if (conv._m2_fail_message) return { nextState: M2.INTAKE, messageToSend: conv._m2_fail_message };
+
+        if (conv._m2_fail_message) {
+          return {
+            nextState: M2.INTAKE,
+            messageToSend: conv._m2_fail_message
+          };
+        }
 
         const m2 = conv.conversation_data.m2;
+
+        // Redirección si el producto lo decidió
+        if (m2._redirect_individual) {
+          return {
+            nextState: "INICIO",
+            messageToSend: {
+              type: "text",
+              text: {
+                body:
+                  "Gracias 🙌\n\n" +
+                  "Para empresas con menos de 20 colaboradores contamos con soluciones individuales.\n\n" +
+                  "https://tienda.ammia.io/inicio/multi-quote"
+              }
+            }
+          };
+        }
+
         if (m2._go_contact) {
           return {
             nextState: M2.CONTACT,
             messageToSend: {
               type: "text",
               text: {
-                body: "Perfecto. Ahora comparteme:\n- Nombre\n- Puesto\n- Empresa\n- Correo\n\nEj: Juan, RH, ACME, juan@acme.com",
-              },
-            },
+                body:
+                  "Perfecto. Ahora compárteme:\n" +
+                  "- Nombre\n- Puesto\n- Empresa\n- Correo\n\n" +
+                  "Ej: Juan, RH, ACME, juan@acme.com"
+              }
+            }
           };
         }
 
-        const p = PRODUCTS[m2.active_product];
-        const step = p.steps[m2.active_step_index] || p.steps[0];
-        return { nextState: M2.INTAKE, messageToSend: step.ask() };
-      },
+        const p = PRODUCTS[m2.product];
+        return {
+          nextState: M2.INTAKE,
+          messageToSend: p.steps[m2.active_step_index].ask()
+        };
+      }
     };
   }
 
+  /**
+   * ============================================================
+   * 3️⃣ CAPTURA DE CONTACTO
+   * ============================================================
+   */
   if (currentState === M2.CONTACT && type === "text") {
-    const parsed = parseContactBlock(textBody || "");
-    const req = rules.qualification.required_contact_fields || ["name", "role", "company", "email"];
 
-    const ok = req.every((k) => {
-      if (k === "email") return parsed.email && isValidEmail(parsed.email);
-      return !!parsed[k];
+    const parsed = parseContactBlock(textBody || "");
+
+    const required = ["name", "role", "company", "email"];
+
+    const valid = required.every(field => {
+      if (field === "email") {
+        return parsed.email && isValidEmail(parsed.email);
+      }
+      return !!parsed[field];
     });
 
-    if (!ok) {
+    if (!valid) {
       return {
         nextState: M2.CONTACT,
         messageToSend: {
           type: "text",
-          text: { body: "Casi listo. Mandame: Nombre, Puesto, Empresa y Correo (todo en un mensaje)." },
-        },
-        mutateConversation: null,
+          text: {
+            body:
+              "Comparte los datos en este formato:\n" +
+              "Nombre, Puesto, Empresa, correo@empresa.com"
+          }
+        }
       };
     }
 
     return {
-      nextState: M2.DONE,
-      messageToSend: { type: "text", text: { body: "Gracias. Registro listo. En breve te contactamos." } },
+      nextState: "INICIO",
+
+      messageToSend: {
+        type: "text",
+        text: {
+          body:
+            "Gracias 🙌\n\n" +
+            "Hemos recibido tu información.\n" +
+            "Te contactaremos en un lapso de máximo 2 días."
+        }
+      },
+
       mutateConversation: (conv) => {
         initM2(conv);
         conv.conversation_data.m2.contact = parsed;
         conv.markModified("conversation_data");
       },
+
       outboxJob: {
-        module: "M2_MULTI",
-        payload_builder: "M2_MULTI",
-        final_state: STATES.M2_DONE,
-      },
+        module: "M2_SINGLE",
+        payload_builder: "M2_SINGLE",
+        final_state: "INICIO"
+      }
     };
   }
 
   return null;
 };
 
+/**
+ * ============================================================
+ * PAYLOAD BUILDERS
+ * ============================================================
+ */
 const PAYLOAD_BUILDERS = {
-  M2_MULTI: ({ userConversation }) => {
+  M2_SINGLE: ({ userConversation }) => {
+
     const m2 = userConversation.conversation_data?.m2 || {};
-    const selected = m2.selected_products || [];
-    const answers = m2.answers || {};
-    const contact = m2.contact || {};
+    const p = PRODUCTS[m2.product];
 
-    const fragments = selected.reduce((acc, k) => {
-      const p = PRODUCTS[k];
-      if (!p) return acc;
-      const frag = p.build_payload_fragment ? p.build_payload_fragment(answers[k] || {}) : {};
-      return { ...acc, ...frag };
-    }, {});
+    const fragment = p?.build_payload_fragment
+      ? p.build_payload_fragment(m2.answers || {})
+      : {};
 
-    return {
+    const payload = {
       wa_id: userConversation.wa_id,
       captured_at: new Date().toISOString(),
-      selected_products: selected,
-      ...fragments,
-      contact,
-      final_state: STATES.M2_DONE,
+      product: m2.product,
+      lead_priority: m2.leadPriority,
+      qualification_status: m2.qualificationStatus,
+      ...fragment,
+      contact: m2.contact,
+      final_state: M2.DONE
     };
-  },
+
+    // Reset interno
+    userConversation.conversation_data.m2 = {
+      product: null,
+      active_step_index: 0,
+      answers: {},
+      contact: null,
+      qualificationStatus: null,
+      leadPriority: null,
+    };
+
+    userConversation.markModified("conversation_data");
+
+    return payload;
+  }
 };
 
 module.exports = { handleM2Engine, PAYLOAD_BUILDERS, M2 };
