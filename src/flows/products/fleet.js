@@ -1,5 +1,8 @@
 // src/flows/products/fleet.js
-
+/**
+ * Parser inteligente de contactos
+ */
+const { parseLeadContact } = require("../../utils/leadContactParser");
 /**
  * FLEET – Motor de flujo de seguros de flotilla
  *
@@ -10,10 +13,10 @@
  */
 
 const VEHICLE_RANGES = {
-  "1-5": { priority: 0, qualified: true },
-  "6-20": { priority: 1, qualified: true },
-  "21-50": { priority: 2, qualified: true },
-  "50+": { priority: 3, qualified: true },
+  "0-10": { priority: 0, qualified: true },
+  "10-50": { priority: 1, qualified: true },
+  "51-200": { priority: 2, qualified: true },
+  "+201": { priority: 3, qualified: true },
 };
 
 module.exports = {
@@ -32,17 +35,20 @@ module.exports = {
         type: "interactive",
         interactive: {
           type: "list",
-          body: { text: "¿Cuántos vehículos tiene tu flotilla?" },
+          body: {
+            text:
+          "1/2\n\nApóyanos con algunos datos. Esto nos ayudará a cotizar mejor con las aseguradoras.\n\n¿Cuántos vehículos deseas asegurar?"
+            },
           action: {
             button: "Seleccionar",
             sections: [
               {
-                title: "Rango de vehículos",
+                title: "Seleccionar rango",
                 rows: [
-                  { id: "VEH_1_5", title: "1-5 vehículos" },
-                  { id: "VEH_6_20", title: "6-20 vehículos" },
-                  { id: "VEH_21_50", title: "21-50 vehículos" },
-                  { id: "VEH_50_PLUS", title: "50+ vehículos" },
+                  { id: "VEH_10", title: "Menos de 10 vehículos" },
+                  { id: "VEH_10_50", title: "10-50 vehículos" },
+                  { id: "VEH_51_200", title: "51-200 vehículos" },
+                  { id: "VEH_201PLUS", title: "+201 vehículos" },
                 ],
               },
             ],
@@ -50,17 +56,24 @@ module.exports = {
         },
       }),
 
-      parse: (_, context) => {
-        const map = {
-          VEH_1_5: "1-5",
-          VEH_6_20: "6-20",
-          VEH_21_50: "21-50",
-          VEH_50_PLUS: "50+",
-        };
+      /**
+     * Convierte el ID del botón seleccionado
+     * en el rango de vehículos correspondiente.
+     */
+    parse: (_, context) => {
 
-        return {
-          vehicle_range: map[context?.buttonId] || null,
-        };
+      const map = {
+        VEH_10: "0-10",
+        VEH_10_50: "10-50",
+        VEH_51_200: "51-200",
+        VEH_201PLUS: "+201",
+      };
+
+      return {
+        vehicle_range: map[context?.buttonId] || null,
+      };
+
+
       },
 
       is_valid: (a) => !!a.vehicle_range,
@@ -74,54 +87,58 @@ module.exports = {
         text: { body: "Por favor selecciona un rango usando el botón." },
       }),
     },
-
     /**
-     * STEP 2 – Coberturas opcionales
+     * STEP 2 – Captura de contacto
+     * Cada producto captura sus propios datos
      */
     {
-      id: "fleet_coverages",
+      id: "fleet_contact",
 
       ask: () => ({
         type: "text",
         text: {
           body:
-            "Selecciona las coberturas que te interesan:\n\n" +
-            "1️⃣ Daños a terceros\n" +
-            "2️⃣ Robo total\n" +
-            "3️⃣ Incendio\n" +
-            "4️⃣ GMM para conductores\n\n" +
-            "Responde con los números separados por coma.\nEjemplo: 1,3",
+            "2/2\n\n" +
+            "Para enviarte la cotización compárteme:\n\n" +
+            "Nombre, Puesto, Empresa, correo@empresa.com\n\n" +
+            "Ejemplo:\nJuan Pérez, Gerente de RH, ACME, juan@acme.com"
         },
       }),
 
-      parse: (text) => {
-        const valid = ["1", "2", "3", "4"];
-        const selected = String(text || "")
-          .split(",")
-          .map((n) => n.trim())
-          .filter((n) => valid.includes(n));
+      /**
+       * Parser inteligente de contacto
+       * Utiliza el util compartido para interpretar
+       * múltiples formatos de texto enviados por el usuario
+       */
 
-        const map = {
-          "1": "Daños a terceros",
-          "2": "Robo total",
-          "3": "Incendio",
-          "4": "GMM para conductores",
-        };
+      
+
+      parse: (text) => {
+
+        const parsed = parseLeadContact(text);
 
         return {
-          coverages: selected.map((n) => map[n]),
+          contact: parsed
         };
       },
 
-      is_valid: (a) => Array.isArray(a.coverages) && a.coverages.length > 0,
+      is_valid: (a) =>
+        a.contact?.name &&
+        a.contact?.role &&
+        a.contact?.company &&
+        a.contact?.email,
 
       store: (answers, parsed) => {
-        answers.coverages = parsed.coverages;
+        answers.contact = parsed.contact;
       },
 
       fail_message: () => ({
         type: "text",
-        text: { body: "Selecciona al menos una opción válida. Ejemplo: 1,3" },
+        text: {
+          body:
+            "Comparte los datos en este formato:\n\n" +
+            "Nombre, Puesto, Empresa, correo@empresa.com"
+        }
       }),
     },
   ],
@@ -137,10 +154,24 @@ module.exports = {
     };
   },
 
+    /**
+   * ============================================================
+   * FRAGMENTO DE PAYLOAD DEL PRODUCTO
+   * ============================================================
+   *
+   * IMPORTANTE:
+   * Los productos NO deben construir el objeto contact.
+   * El contacto es responsabilidad del M2_ENGINE.
+   *
+   * Aquí solo se devuelven los datos propios del producto.
+   */
+
   build_payload_fragment: (answers) => ({
+
     fleet: {
       vehicle_range: answers.vehicle_range || null,
-      coverages: answers.coverages || [],
-    },
+      coverages: answers.coverages || []
+    }
+
   }),
 };

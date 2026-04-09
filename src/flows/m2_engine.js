@@ -29,19 +29,21 @@
 
 const PRODUCTS = require("./productsRegistry");
 
+/**
+ * Utilidades base del motor
+ */
 const {
-  ensureConversationData,
-  parseContactBlock,
-  isValidEmail
+  ensureConversationData
 } = require("../utils/extractors");
 
 /**
  * Estados internos del flujo M2
- * Se usan strings directos para simplificar arquitectura.
+ * Ahora solo existe INTAKE porque
+ * cada producto define TODOS sus pasos
+ * incluyendo captura de contacto.
  */
 const M2 = {
   INTAKE: "M2_INTAKE",
-  CONTACT: "M2_CONTACT",
   DONE: "M2_DONE",
 };
 
@@ -101,11 +103,14 @@ const handleM2Engine = ({ currentState, type, textBody, buttonId, buttonTitle })
         initM2(conv);
 
         const m2 = conv.conversation_data.m2;
-        m2.product = product.key;
-        m2.active_step_index = 0;
-        m2.answers = {};
-        m2.qualificationStatus = null;
-        m2.leadPriority = null;
+       conv.conversation_data.m2 = {
+        product: product.key,
+        active_step_index: 0,
+        answers: {},
+        contact: null,
+        qualificationStatus: null,
+        leadPriority: null,
+      };
 
         conv.markModified("conversation_data");
       },
@@ -157,23 +162,87 @@ const handleM2Engine = ({ currentState, type, textBody, buttonId, buttonTitle })
           }
         }
 
-        m2.active_step_index += 1;
+        /**
+       * Avanza al siguiente paso del producto
+       */
+      m2.active_step_index += 1;
 
-        if (m2.active_step_index >= p.steps.length) {
-          m2._go_contact = true;
-        }
+      /**
+       * Si se terminaron los steps del producto
+       * marcamos finalización del flujo
+       */
+      if (m2.active_step_index >= p.steps.length) {
+
+        /**
+       * ============================================================
+       * CAPTURA FINAL DE CONTACTO
+       * ============================================================
+       *
+       * Algunos productos almacenan el contacto completo en:
+       * answers.contact
+       *
+       * Por lo tanto normalizamos aquí para que el engine
+       * siempre tenga un objeto estándar en m2.contact.
+       */
+
+     /**
+     * ============================================================
+     * NORMALIZACIÓN DE CONTACTO
+     * ============================================================
+     * Algunos productos guardan contacto en answers.contact.
+     * Si no existe, generamos estructura vacía.
+     */
+
+    if (m2.answers.contact) {
+
+      m2.contact = {
+        name: m2.answers.contact.name || null,
+        role: m2.answers.contact.role || null,
+        company: m2.answers.contact.company || null,
+        email: m2.answers.contact.email || null,
+        phone: conv.wa_id || null
+      };
+
+    } else {
+
+      m2.contact = {
+        name: null,
+        role: null,
+        company: null,
+        email: null,
+        phone: conv.wa_id || null
+      };
+
+}
+
+        m2._flow_complete = true;
+      }
 
         conv.markModified("conversation_data");
       },
 
       afterMutate: (conv) => {
 
-        if (conv._m2_fail_message) {
-          return {
-            nextState: M2.INTAKE,
-            messageToSend: conv._m2_fail_message
-          };
-        }
+       /**
+       * ============================================================
+       * MANEJO DE ERROR DE STEP
+       * ============================================================
+       * Si el step falló, enviamos el mensaje de error
+       * y limpiamos la bandera para evitar loops.
+       */
+
+      if (conv._m2_fail_message) {
+
+        const fail = conv._m2_fail_message;
+
+        // Limpia bandera para que no se repita en el siguiente mensaje
+        delete conv._m2_fail_message;
+
+        return {
+          nextState: M2.INTAKE,
+          messageToSend: fail
+        };
+      }
 
         const m2 = conv.conversation_data.m2;
 
@@ -193,85 +262,44 @@ const handleM2Engine = ({ currentState, type, textBody, buttonId, buttonTitle })
           };
         }
 
-        if (m2._go_contact) {
-          return {
-            nextState: M2.CONTACT,
-            messageToSend: {
-              type: "text",
-              text: {
-                body:
-                  "Perfecto. Ahora compárteme:\n" +
-                  "- Nombre\n- Puesto\n- Empresa\n- Correo\n\n" +
-                  "Ej: Juan, RH, ACME, juan@acme.com"
-              }
-            }
-          };
-        }
+        
 
-        const p = PRODUCTS[m2.product];
+        /**
+       * Si el producto terminó todos sus steps
+       * se envía al outbox para guardar el lead.
+       */
+      if (m2._flow_complete) {
+
         return {
-          nextState: M2.INTAKE,
-          messageToSend: p.steps[m2.active_step_index].ask()
+          nextState: "INICIO",
+
+          messageToSend: {
+            type: "text",
+            text: {
+              body:
+                "Gracias 🙌\n\n" +
+                "Hemos recibido tu información.\n" +
+                "Te contactaremos en breve."
+            }
+          },
+
+          /**
+           * JOB que enviará el lead al OUTBOX
+           */
+          outboxJob: {
+            module: "M2_SINGLE",
+            payload_builder: "M2_SINGLE",
+            final_state: "INICIO"
+          }
         };
       }
-    };
-  }
 
-  /**
-   * ============================================================
-   * 3️⃣ CAPTURA DE CONTACTO
-   * ============================================================
-   */
-  if (currentState === M2.CONTACT && type === "text") {
+      const p = PRODUCTS[m2.product];
 
-    const parsed = parseContactBlock(textBody || "");
-
-    const required = ["name", "role", "company", "email"];
-
-    const valid = required.every(field => {
-      if (field === "email") {
-        return parsed.email && isValidEmail(parsed.email);
-      }
-      return !!parsed[field];
-    });
-
-    if (!valid) {
       return {
-        nextState: M2.CONTACT,
-        messageToSend: {
-          type: "text",
-          text: {
-            body:
-              "Comparte los datos en este formato:\n" +
-              "Nombre, Puesto, Empresa, correo@empresa.com"
-          }
-        }
+        nextState: M2.INTAKE,
+        messageToSend: p.steps[m2.active_step_index].ask()
       };
-    }
-
-    return {
-      nextState: "INICIO",
-
-      messageToSend: {
-        type: "text",
-        text: {
-          body:
-            "Gracias 🙌\n\n" +
-            "Hemos recibido tu información.\n" +
-            "Te contactaremos en un lapso de máximo 2 días."
-        }
-      },
-
-      mutateConversation: (conv) => {
-        initM2(conv);
-        conv.conversation_data.m2.contact = parsed;
-        conv.markModified("conversation_data");
-      },
-
-      outboxJob: {
-        module: "M2_SINGLE",
-        payload_builder: "M2_SINGLE",
-        final_state: "INICIO"
       }
     };
   }
