@@ -33,38 +33,53 @@ logger.debug("--- DEBUG: PHONE_NUMBER_ID usado:", PHONE_NUMBER_ID);
 
 // --- Función para verificar Webhook Meta (VERSIÓN FINAL SEGURA) ---
 // --- Función para verificar Webhook Meta (VERSIÓN FINAL CORRECTA) ---
+// --- Función FINAL para verificar Webhook Meta ---
 const VerifyToken = (req, res) => {
 
-  console.log("--- VERIFY META START ---");
+  console.log("=== VERIFY META START ===");
   console.log("URL:", req.originalUrl);
   console.log("QUERY:", req.query);
 
-  const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "jon666";
+  try {
 
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
+    const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "Ammia-21";
 
-  logger.debug("mode:", mode);
-  logger.debug("token:", token);
-  logger.debug("challenge:", challenge);
+    const mode = req.query["hub.mode"];
+    const token = req.query["hub.verify_token"];
+    const challenge = req.query["hub.challenge"];
 
-  // ✔ VALIDACIÓN OFICIAL META
-  if (
-    mode === "subscribe" &&
-    token === VERIFY_TOKEN &&
-    challenge
-  ) {
-    console.log("✔ META VERIFIED SUCCESS");
+    console.log("MODE:", mode);
+    console.log("TOKEN:", token);
+    console.log("CHALLENGE:", challenge);
 
-    // ⚠️ IMPORTANTE: SOLO DEVOLVER CHALLENGE
-    return res.status(200).send(String(challenge));
+    // ✅ SOLO VALIDACIÓN META
+    if (mode === "subscribe" && token === VERIFY_TOKEN && challenge) {
+
+      console.log("✔ META VERIFIED");
+
+      return res.status(200).send(challenge);
+    }
+
+    // ⚠️ IMPORTANTE:
+    // Meta puede hacer requests sin params → NO bloquear
+    if (!mode && !token && !challenge) {
+
+      console.log("ℹ️ Empty GET request - Meta probe or browser hit");
+
+      return res.status(200).send("OK");
+    }
+
+    // 🚨 NUNCA 403 (esto rompe Meta validation)
+    console.log("❌ Invalid request - safe response");
+
+    return res.status(200).send("OK");
+
+  } catch (error) {
+
+    console.error("Verify error:", error);
+
+    return res.status(200).send("OK");
   }
-
-  // ❌ CASO INVALIDO: responder 403 (NO 200 OK)
-  console.log("❌ INVALID VERIFY REQUEST");
-
-  return res.sendStatus(403);
 };
 // --- Fin Función de Verificación ---
 
