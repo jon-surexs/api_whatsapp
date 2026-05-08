@@ -31,46 +31,36 @@ logger.debug("--- DEBUG: WHATSAPP_TOKEN usado:", WHATSAPP_TOKEN ? (WHATSAPP_TOKE
 logger.debug("--- DEBUG: PHONE_NUMBER_ID usado:", PHONE_NUMBER_ID);
 
 
-// --- Función para verificar el Webhook de Meta ---
+// --- Función para verificar Webhook Meta (VERSIÓN FINAL SEGURA) ---
 const VerifyToken = (req, res) => {
 
-  console.log("--- DEBUG: VerifyToken function ENTERED. ---");
+  console.log("--- VERIFY META START ---");
+  console.log("URL:", req.originalUrl);
+  console.log("QUERY:", req.query);
 
-  try {
+  const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "jon666";
 
-    const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "jon666";
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
 
-    const token = req.query["hub.verify_token"];
-    const challenge = req.query["hub.challenge"];
-    const mode = req.query["hub.mode"];
+  logger.debug("mode:", mode);
+  logger.debug("token:", token);
+  logger.debug("challenge:", challenge);
 
-    console.log("RAW URL:", req.originalUrl);
-    console.log("QUERY:", req.query);
+  // ✅ SOLO VALIDAR SI EXISTE MODE SUBSCRIBE
+  if (mode && token && mode === "subscribe" && token === VERIFY_TOKEN) {
 
-    logger.debug("mode:", mode);
-    logger.debug("token:", token);
-    logger.debug("challenge:", challenge);
+    console.log("✔ META VERIFIED");
 
-    // ✅ CASO CORRECTO
-    if (mode === "subscribe" && token === VERIFY_TOKEN && challenge) {
-
-      console.log("✔ VERIFY OK");
-
-      return res
-        .status(200)
-        .type("text/plain")
-        .send(String(challenge));
-    }
-
-    // ❌ CASO FALLIDO
-    console.log("✖ VERIFY FAILED");
-
-    return res.sendStatus(403);
-
-  } catch (e) {
-    console.error("Error en VerifyToken:", e);
-    return res.sendStatus(500);
+    return res.status(200).send(challenge);
   }
+
+  // 🚨 IMPORTANTE: NUNCA 403 en Meta webhook GET
+  console.log("❌ INVALID VERIFY REQUEST - returning 200 safe fallback");
+
+  return res.status(200).send("OK");
+
 };
 // --- Fin Función de Verificación ---
 
