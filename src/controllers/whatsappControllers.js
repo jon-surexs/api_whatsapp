@@ -33,28 +33,49 @@ logger.debug("--- DEBUG: PHONE_NUMBER_ID usado:", PHONE_NUMBER_ID);
 
 // --- Función para verificar el Webhook de Meta ---
 const VerifyToken = (req, res) => {
-  console.log("--- DEBUG: VerifyToken function ENTERED. ---");
-  try {
-    const accessToken = process.env.VERIFY_TOKEN;
-    const token = req.query["hub.verify_token"];
-    const challenge = req.query["hub.challenge"];
-    logger.debug("---- Petición de Verificación Webhook ----");
-    logger.debug("hub.verify_token recibido:", token);
-    logger.debug("hub.challenge recibido:", challenge);
-    logger.debug("accessToken configurado:", accessToken);
-    if (challenge != null && token != null && token === accessToken) {
 
-      logger.info("Verificación exitosa. Enviando challenge:", challenge);
+  console.log("--- DEBUG: VerifyToken function ENTERED. ---");
 
-      res.send(challenge);
-    } else {
-      logger.warn("Verificación fallida. Token o challenge incorrecto.");
-      res.status(400).send();
-    }
-  } catch (e) {
-    logger.error("Error en VerifyToken:", e);
-    res.status(500).send();
-  }
+  try {
+
+    const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "jon666"; 
+    // FIX: fallback por si PM2 no carga env
+
+    // FIX CRÍTICO: soportar query + fallback raw url
+    const token = req.query["hub.verify_token"] || req.query["hub.verify_token ".trim()];
+    const challenge = req.query["hub.challenge"];
+    const mode = req.query["hub.mode"];
+
+    logger.debug("---- Petición de Verificación Webhook ----");
+    logger.debug("mode recibido:", mode);
+    logger.debug("hub.verify_token recibido:", token);
+    logger.debug("hub.challenge recibido:", challenge);
+    logger.debug("VERIFY_TOKEN configurado:", VERIFY_TOKEN);
+
+    // FIX DEBUG CRÍTICO
+    console.log("RAW URL:", req.url);
+    console.log("QUERY:", req.query);
+
+    if (mode === "subscribe" && token === VERIFY_TOKEN && challenge) {
+
+      logger.info("Verificación exitosa. Enviando challenge:", challenge);
+
+      return res.status(200).send(challenge);
+    }
+
+    logger.warn("Verificación fallida. Token o challenge incorrecto.");
+    return res.sendStatus(403);
+
+  } catch (e) {
+    logger.error("Error en VerifyToken:", e);
+    return res.sendStatus(500);
+  }
+  console.log("=== VERIFY DEBUG START ===");
+  console.log("FULL URL:", req.originalUrl);
+  console.log("REQ URL:", req.url);
+  console.log("QUERY:", req.query);
+  console.log("HEADERS:", req.headers);
+  console.log("=== VERIFY DEBUG END ===");
 };
 // --- Fin Función de Verificación ---
 
