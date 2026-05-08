@@ -7,11 +7,12 @@
  *
  * Este archivo es el **enrutador central de mensajes**.
  * 
- * Su función principal es decidir **qué motor o flujo procesa el mensaje**
- * y qué respuesta se envía al usuario. Trabaja en conjunto con:
- * 
- * 1) M1 Intent (detector de intención del usuario)
- * 2) M2 Engine (flujo guiado por pasos / campos cerrados)
+ * Su función principal es decidir qué respuesta guiada por botones
+ * se envía al usuario y cuándo delegar al M2 Engine.
+ *
+ * M1 Intent fue removido del runtime activo. El chatbot ahora es
+ * button-driven: UI/Menu -> M2 Engine -> Products -> Outbox.
+ * M2 es el único motor conversacional activo.
  *
  * Recibe el mensaje desde el handler principal (messageHandler.js):
  *    handleIncomingMessage → routeMessage
@@ -28,7 +29,6 @@
  * ============================================================
  */
 
-const { handleM1Intent } = require("./m1_intent"); // Motor de intención textual (clasifica mensajes)
 const { handleM2Engine } = require("./m2_engine"); // Flujo guiado paso a paso
 const { STATES } = require("../constants/states.js"); // Estados globales de la conversación
 const { buildMainMenu, infoSurexs, cotizarSeguros} = require("../utils/ui"); // Funciones para construir respuestas
@@ -84,7 +84,7 @@ const routeMessage = async ({ currentState, type, textBody, buttonId, buttonTitl
 // ------------------------------------------------------------
 if (currentState === STATES.INICIO && type === "text") {
 
-  logger.info("INICIO -> Sending Main Menu (intent detection disabled)");
+  logger.info("INICIO -> Sending Main Menu (button-driven flow)");
 
   return {
     messageToSend: buildMainMenu(
@@ -184,49 +184,8 @@ if (currentState === STATES.INICIO && type === "text") {
       return { messageToSend: buildMainMenu(), nextState: STATES.SYS_MENU, mutateConversation };
     }
 
-    // Lógica para SYS_MENU
-    if (currentState === STATES.SYS_MENU) {
-      const intentResult = await handleM1Intent({ message: textBody });
-      logger.info(
-        `SYS_MENU M1 -> Intent: ${intentResult.intent} | Confidence: ${intentResult.confidence} | BelowThreshold: ${intentResult.belowThreshold}`
-      );
-      if (intentResult.belowThreshold) intentResult.intent = "UNKNOWN";
-
-      switch (intentResult.intent) {
-        case "EMPRESARIAL_BENEFICIOS":
-        case "EMPRESARIAL_PATRIMONIAL":
-          logger.info("SYS_MENU -> Routing to M2");
-          const m2FromMenu = await handleM2Engine({ currentState: STATES.M2_INTAKE, type, textBody, buttonId, buttonTitle });
-          if (m2FromMenu) return m2FromMenu;
-
-        case "NO_TARGET_INDIVIDUAL":
-          logger.info("SYS_MENU -> Redirecting to Individual");
-          return {
-            messageToSend: {
-              type: "text",
-              text: {
-                body:
-                  "¡Claro! 🙌 \nActualmente nos especializamos en seguros empresariales.\n\n" +
-                  "Si buscas un seguro individual para tu familia, puedes cotizar aquí: https://tienda.ammia.io/inicio/multi-quote\n\n" +
-                  "Si en algún momento necesitas protección para tu empresa, con gusto te ayudamos.",
-              },
-            },
-            nextState: STATES.SYS_MENU,
-            mutateConversation: null,
-          };
-
-        case "INFO_SUREXS":
-          return {
-            messageToSend: { type: "text", text: { body: "Surexs es una firma especializada en soluciones de seguros empresariales." } },
-            nextState: STATES.SYS_MENU,
-            mutateConversation: null,
-          };
-
-        
-      }
-    }
-
-    
+    // M1 Intent ya no clasifica texto libre en SYS_MENU.
+    // Fuera de M2, el bot vuelve al menú para mantener el flujo guiado por botones.
 
     // Última opción: menú principal
     logger.info("Fallback -> Sending Main Menu");

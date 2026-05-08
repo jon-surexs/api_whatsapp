@@ -15,7 +15,7 @@
  * Webhook
  *   → messageHandler
  *       → routeMessage
- *           → M1 (intent)
+ *           → UI/Menu
  *           → M2 (este engine)
  *       → M3 (Outbox)
  *
@@ -28,6 +28,7 @@
  */
 
 const PRODUCTS = require("./productsRegistry");
+const { buildMainMenu } = require("../utils/ui");
 
 /**
  * Utilidades base del motor
@@ -63,6 +64,28 @@ const initM2 = (conv) => {
       leadPriority: null,
     };
 
+    conv.markModified("conversation_data");
+  }
+};
+
+/**
+ * Reinicia el estado interno de M2.
+ * Se usa como protección contra sesiones legacy o estados corruptos
+ * donde la conversación quedó en M2_INTAKE sin producto válido.
+ */
+const resetM2 = (conv) => {
+  ensureConversationData(conv);
+
+  conv.conversation_data.m2 = {
+    product: null,
+    active_step_index: 0,
+    answers: {},
+    contact: null,
+    qualificationStatus: null,
+    leadPriority: null,
+  };
+
+  if (typeof conv.markModified === "function") {
     conv.markModified("conversation_data");
   }
 };
@@ -138,7 +161,24 @@ const handleM2Engine = ({ currentState, type, textBody, buttonId, buttonTitle })
         initM2(conv);
 
         const m2 = conv.conversation_data.m2;
+        /**
+         * Guard defensivo:
+         * protege contra sesiones legacy o estados corruptos donde
+         * current_state quedó en M2_INTAKE pero no existe producto activo.
+         */
+        if (!m2.product || !PRODUCTS[m2.product]) {
+          resetM2(conv);
+          conv._m2_corrupt_session = true;
+          return;
+        }
+
         const p = PRODUCTS[m2.product];
+        if (!p.steps || !p.steps[m2.active_step_index]) {
+          resetM2(conv);
+          conv._m2_corrupt_session = true;
+          return;
+        }
+
         const step = p.steps[m2.active_step_index];
 
         const parsed = step.parse(textBody, { buttonId, buttonTitle });
@@ -246,6 +286,17 @@ const handleM2Engine = ({ currentState, type, textBody, buttonId, buttonTitle })
 
         const m2 = conv.conversation_data.m2;
 
+        if (conv._m2_corrupt_session) {
+          delete conv._m2_corrupt_session;
+
+          return {
+            nextState: "SYS_MENU",
+            messageToSend: buildMainMenu(
+              "El flujo anterior expiró o quedó incompleto. Elige una opción del menú:"
+            )
+          };
+        }
+
         // Redirección si el producto lo decidió
         if (m2._redirect_individual) {
           return {
@@ -294,7 +345,30 @@ const handleM2Engine = ({ currentState, type, textBody, buttonId, buttonTitle })
         };
       }
 
+      /**
+       * Guard defensivo adicional antes de pedir el siguiente step.
+       * Evita crash si una sesión legacy perdió el producto o el índice.
+       */
+      if (!m2.product || !PRODUCTS[m2.product]) {
+        resetM2(conv);
+        return {
+          nextState: "SYS_MENU",
+          messageToSend: buildMainMenu(
+            "El flujo anterior expiró o quedó incompleto. Elige una opción del menú:"
+          )
+        };
+      }
+
       const p = PRODUCTS[m2.product];
+      if (!p.steps || !p.steps[m2.active_step_index]) {
+        resetM2(conv);
+        return {
+          nextState: "SYS_MENU",
+          messageToSend: buildMainMenu(
+            "El flujo anterior expiró o quedó incompleto. Elige una opción del menú:"
+          )
+        };
+      }
 
       return {
         nextState: M2.INTAKE,
@@ -316,7 +390,9 @@ const PAYLOAD_BUILDERS = {
   M2_SINGLE: ({ userConversation }) => {
 
     const m2 = userConversation.conversation_data?.m2 || {};
-    const p = PRODUCTS[m2.product];
+    // Guard defensivo para evitar crash si se intenta construir payload
+    // desde una conversación legacy sin producto M2 válido.
+    const p = m2.product ? PRODUCTS[m2.product] : null;
 
     const fragment = p?.build_payload_fragment
       ? p.build_payload_fragment(m2.answers || {})

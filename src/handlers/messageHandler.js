@@ -21,7 +21,7 @@
  * Arquitectura actual:
  *
  * Webhook → handleIncomingMessage →
- *    → routeMessage (M1 intención + M2 engine)
+ *    → routeMessage (UI/Menu button-driven + M2 engine)
  *    → Mutaciones
  *    → Outbox (M3)
  *    → Save Mongo
@@ -139,7 +139,7 @@ const handleIncomingMessage = async (messageData) => {
 
 
   // ------------------------------------------------------------
-  // 4) ROUTER (M1 + M2)
+  // 4) ROUTER (UI/MENU + M2)
   // ------------------------------------------------------------
   // routeMessage decide:
   // - messageToSend
