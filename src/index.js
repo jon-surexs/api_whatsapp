@@ -2,39 +2,47 @@
 require("dotenv").config();
 
 const express = require("express");
-const apiRoute = require("./routes/routes");     // Carga las rutas
-const connectDB = require('./config/db');         // Carga la función para conectar a MongoDB
-const logger = require('./utils/logger');         // ¡Importa el logger centralizado!
+const apiRoute = require("./routes/routes");
+const connectDB = require('./config/db');
+const logger = require('./utils/logger');
 
-// --- Logs iniciales de la aplicación usando el logger ---
+// --- Logs iniciales ---
 logger.info("index.js loaded.");
 logger.debug("Starting Express application setup.");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware para parsear el cuerpo de las peticiones JSON
+// --- Middleware base ---
 app.use(express.json());
-// Soporte para fomrs
 app.use(express.urlencoded({ extended: true }));
 
-// Middleware para loguear todas las peticiones entrantes ANTES de que lleguen a las rutas específicas
+// --- Logger middleware ---
 app.use((req, res, next) => {
     logger.info(`Incoming Request: ${req.method} ${req.url}`);
-    logger.debug(`Request Body: ${JSON.stringify(req.body)}`); // Log del cuerpo de la petición
-    next(); // Pasa la petición a la siguiente función middleware o ruta
+    logger.debug(`Request Body: ${JSON.stringify(req.body)}`);
+    next();
 });
 
-// Define las rutas principales de la API para WhatsApp
-// Todas las peticiones serán manejadas por apiRoute (que incluye /whatsapp)
+// --- Healthcheck (IMPORTANTE para AWS / Meta / monitoreo) ---
+app.get("/health", (req, res) => {
+    res.status(200).send("OK");
+});
+
+// --- Rutas principales ---
 app.use("/", apiRoute);
 
-// Conecta a la base de datos MongoDB
-connectDB(); 
+// --- ARRANQUE DEL SERVIDOR PRIMERO ---
+app.listen(PORT, async () => {
+    logger.info(`Server listening on ${PORT}`);
 
-// Inicia el servidor Express
-app.listen(PORT, () => {
-    logger.info(`Express server listening on port: ${PORT}`);
+    // --- CONEXIÓN A DB DESPUÉS (NO BLOQUEA WEBHOOK) ---
+    try {
+        await connectDB();
+        logger.info("MongoDB connected successfully.");
+    } catch (error) {
+        logger.error("MongoDB connection failed:", error);
+    }
 });
 
 logger.debug("Express application configured. Awaiting connections.");
