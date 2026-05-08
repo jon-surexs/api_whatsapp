@@ -32,6 +32,7 @@ logger.debug("--- DEBUG: PHONE_NUMBER_ID usado:", PHONE_NUMBER_ID);
 
 
 // --- Función para verificar Webhook Meta (VERSIÓN FINAL SEGURA) ---
+// --- Función para verificar Webhook Meta (VERSIÓN FINAL CORRECTA) ---
 const VerifyToken = (req, res) => {
 
   console.log("--- VERIFY META START ---");
@@ -48,19 +49,22 @@ const VerifyToken = (req, res) => {
   logger.debug("token:", token);
   logger.debug("challenge:", challenge);
 
-  // ✅ SOLO VALIDAR SI EXISTE MODE SUBSCRIBE
-  if (mode && token && mode === "subscribe" && token === VERIFY_TOKEN) {
+  // ✔ VALIDACIÓN OFICIAL META
+  if (
+    mode === "subscribe" &&
+    token === VERIFY_TOKEN &&
+    challenge
+  ) {
+    console.log("✔ META VERIFIED SUCCESS");
 
-    console.log("✔ META VERIFIED");
-
-    return res.status(200).send(challenge);
+    // ⚠️ IMPORTANTE: SOLO DEVOLVER CHALLENGE
+    return res.status(200).send(String(challenge));
   }
 
-  // 🚨 IMPORTANTE: NUNCA 403 en Meta webhook GET
-  console.log("❌ INVALID VERIFY REQUEST - returning 200 safe fallback");
+  // ❌ CASO INVALIDO: responder 403 (NO 200 OK)
+  console.log("❌ INVALID VERIFY REQUEST");
 
-  return res.status(200).send("OK");
-
+  return res.sendStatus(403);
 };
 // --- Fin Función de Verificación ---
 
