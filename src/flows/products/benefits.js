@@ -2,8 +2,8 @@
 /**
  * Parser inteligente de contactos
  */
-const { parseLeadContact } = require("../../utils/leadContactParser");
-const MIN_EMPLOYEES = 20;
+
+
 
 const EMPLOYEE_RANGES = {
   "<30": { priority: 0, qualified: false },
@@ -126,7 +126,7 @@ module.exports = {
               LESS_THAN_30: "<30",
               EMP_30_100: "30-100",
               EMP_101_250: "101-250",
-              EMP_250PLUS: "100-500"
+              EMP_250PLUS: "250+"
             };
 
             return {
@@ -158,63 +158,138 @@ module.exports = {
      * si en el futuro se requieren campos adicionales.
      */
     {
-      id: "benefits_contact",
+      id: "contact_name",
 
       ask: () => ({
         type: "text",
         text: {
-          body:
-            "3/3\n\n" +
-            "Para enviarte la cotización compárteme:\n\n" +
-            "Nombre, Puesto, Empresa, correo@empresa.com\n\n" +
-            "Ejemplo:\nJuan Pérez, Gerente de RH, ACME, juan@acme.com"
+          body: "3/5\n\n¿Cuál es tu nombre completo?"
         }
       }),
 
-      /**
-     * Parser inteligente de contacto
-     * permite formatos libres del usuario
-     */
+      parse: (text) => ({
+        name: String(text || "").trim()
+      }),
 
-    parse: (text) => {
+      is_valid: (a) => !!a.name,
 
-      const parsed = parseLeadContact(text);
-
-      return {
-        contact: parsed
-      };
-
+     store: (answers, parsed) => {
+      answers.contact_name = parsed.name;
     },
-
-      /**
-       * Validación básica de los datos
-       */
-      is_valid: (a) =>
-        a.contact?.name &&
-        a.contact?.role &&
-        a.contact?.company &&
-        a.contact?.email,
-
-      /**
-       * Guardado dentro del objeto answers del motor M2
-       */
-      store: (answers, parsed) => {
-        answers.contact = parsed.contact;
-      },
-
-      /**
-       * Mensaje de error si el formato no es correcto
-       */
       fail_message: () => ({
         type: "text",
         text: {
-          body:
-            "Por favor comparte los datos en este formato:\n\n" +
-            "Nombre, Puesto, Empresa, correo@empresa.com"
+          body: "Por favor escribe tu nombre completo."
         }
       }),
-    }   
-      
+    },
+
+        {
+      id: "contact_role",
+
+      ask: () => ({
+        type: "text",
+        text: {
+          body: "4/5\n\n¿Cuál es tu puesto?"
+        }
+      }),
+
+      parse: (text) => ({
+        role: String(text || "").trim()
+      }),
+
+      is_valid: (a) => !!a.role,
+
+          store: (answers, parsed) => {
+        answers.contact_role = parsed.role;
+      },
+
+      fail_message: () => ({
+        type: "text",
+        text: {
+          body: "Por favor escribe tu puesto."
+        }
+      }),
+    },
+    {
+  id: "contact_email",
+
+  ask: () => ({
+    type: "text",
+    text: {
+      body:
+        "5/5\n\n" +
+        "Para enviarte la cotización necesitamos tu correo corporativo.\n\n" +
+        "📌 Importante:\n" +
+        "- No se aceptan correos personales (Gmail, Hotmail, Outlook, etc.)\n\n" +
+        "Escribe tu correo corporativo (ej: nombre@empresa.com)"
+    }
+  }),
+
+  parse: (text) => {
+    const email = String(text || "").trim().toLowerCase();
+
+    // extraer dominio
+    const domainMatch = email.match(/@([^@\s]+)/);
+    const domain = domainMatch ? domainMatch[1] : null;
+
+    // inferencia básica de empresa desde dominio
+    let company = null;
+
+    if (domain) {
+      company = domain
+        .split(".")[0] // ejemplo: acme.com → acme
+        .toUpperCase();
+    }
+
+    return {
+      email,
+      company
+    };
+  },
+
+  is_valid: (a) => {
+    if (!a.email) return false;
+
+    // validar email básico
+    const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(a.email);
+
+    if (!isEmailValid) return false;
+
+    // bloquear correos personales
+    const blockedDomains = [
+      "gmail.com",
+      "hotmail.com",
+      "outlook.com",
+      "yahoo.com",
+      "icloud.com"
+    ];
+
+    const domain = a.email.split("@")[1];
+
+    if (!domain) return false;
+
+    if (blockedDomains.includes(domain)) return false;
+
+    return true;
+  },
+
+  store: (answers, parsed) => {
+  answers.contact_email = parsed.email;
+  answers.contact_company = parsed.company;
+},
+
+  fail_message: () => ({
+    type: "text",
+    text: {
+      body:
+        "❌ Correo inválido o no corporativo.\n\n" +
+        "Por favor usa un correo de empresa (ej: nombre@tuempresa.com).\n" +
+        "No se aceptan Gmail, Hotmail, Outlook, etc."
+    }
+  }),
+}
+          
 
     ],
 
@@ -250,11 +325,15 @@ module.exports = {
  */
 
 build_payload_fragment: (answers) => ({
-
   benefits: {
     employee_range: answers.employee_range || null,
     coverages: answers.coverages || []
+  },
+  contact: {
+    name: answers.contact_name || null,
+    role: answers.contact_role || null,
+    email: answers.contact_email || null,
+    company: answers.contact_company || null
   }
-
 }),
 };
